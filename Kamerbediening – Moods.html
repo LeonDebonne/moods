@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kamerbediening – Moods</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --glow: 255,180,110;      /* light colour (rgb) – set by JS */
+    --level: .5;              /* overall light level 0..1 */
+    --accent: #f2a65a;
+    --ink: #f4efe8;
+    --muted: rgba(244,239,232,.55);
+    --line: rgba(255,255,255,.09);
+    --card: rgba(255,255,255,.045);
+    --card-hi: rgba(255,255,255,.09);
+    --t: 1.4s cubic-bezier(.4,.1,.2,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'Manrope',system-ui,sans-serif;
+    color:var(--ink);
+    background:#0d0b0a;
+    min-height:100vh;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ambient wash behind everything follows the mood */
+  .ambient{
+    position:fixed;inset:-20%;
+    background:
+      radial-gradient(60% 50% at 30% 40%, rgba(var(--glow), calc(.10 + var(--level)*.28)), transparent 70%),
+      radial-gradient(50% 50% at 85% 90%, rgba(var(--glow), calc(.04 + var(--level)*.10)), transparent 70%);
+    transition:background var(--t);
+    pointer-events:none;z-index:0;
+  }
+  .grain{position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+  .panel{
+    position:relative;z-index:2;
+    max-width:1280px;margin:0 auto;
+    padding:28px 32px 36px;
+    display:grid;
+    grid-template-columns: 1.5fr 1fr;
+    grid-template-rows:auto 1fr;
+    gap:22px 28px;
+    min-height:100vh;
+  }
+
+  /* ---------- top bar ---------- */
+  .top{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:20px}
+  .room-id{display:flex;align-items:baseline;gap:14px}
+  .room-id h1{font-family:'Instrument Serif',serif;font-weight:400;font-size:38px;letter-spacing:-.01em}
+  .room-id span{font-size:13px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}
+  .status{display:flex;gap:10px;align-items:center}
+  .chip{display:flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid var(--line);border-radius:99px;font-size:13px;color:var(--muted);background:rgba(0,0,0,.2);backdrop-filter:blur(8px)}
+  .chip b{color:var(--ink);font-weight:600}
+  .chip svg{width:16px;height:16px;opacity:.75}
+
+  /* ---------- room visual ---------- */
+  .stage{
+    position:relative;border-radius:28px;overflow:hidden;
+    border:1px solid var(--line);
+    background:#120f0d;
+    min-height:560px;
+    display:flex;flex-direction:column;
+  }
+  .stage::after{content:"";position:absolute;inset:0 0 auto 0;height:45%;background:linear-gradient(180deg,rgba(10,8,7,.55),transparent);pointer-events:none}
+  .stage-caption{z-index:2}
+  .stage svg.room{width:100%;height:100%;flex:1;display:block}
+  .stage-caption{
+    position:absolute;left:28px;top:24px;right:24px;bottom:22px;
+    display:flex;flex-direction:column;justify-content:space-between;gap:16px;
+    pointer-events:none;
+  }
+  .mood-now small{display:block;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+  .mood-now strong{font-family:'Instrument Serif',serif;font-weight:400;font-size:54px;line-height:.95;letter-spacing:-.02em}
+  .mood-now p{margin-top:8px;font-size:14px;color:rgba(244,239,232,.7);max-width:300px;line-height:1.45}
+  .readout{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-self:flex-end}
+  .readout div{background:rgba(0,0,0,.38);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:14px;padding:8px 12px;text-align:right;min-width:74px}
+  .readout small{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .readout b{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+
+  /* ---------- moods ---------- */
+  .moods{display:flex;flex-direction:column;gap:14px}
+  .section-label{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+  .mood-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;flex:1;grid-auto-rows:1fr}
+  .mood{
+    position:relative;isolation:isolate;
+    appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);
+    border-radius:22px;padding:18px 16px 16px;text-align:left;cursor:pointer;
+    min-height:150px;display:flex;flex-direction:column;justify-content:space-between;
+    transition:transform .25s ease, background .4s, border-color .4s;
+    overflow:hidden;font-family:inherit;
+  }
+  .mood::before{
+    content:"";position:absolute;inset:0;z-index:-1;opacity:0;
+    background:radial-gradient(120% 90% at 0% 0%, var(--c), transparent 65%);
+    transition:opacity .6s;
+  }
+  .mood:hover{transform:translateY(-2px);background:var(--card-hi)}
+  .mood:active{transform:scale(.97)}
+  .mood.active{border-color:color-mix(in srgb, var(--c) 70%, transparent)}
+  .mood.active::before{opacity:.38}
+  .mood .ico{width:34px;height:34px;color:var(--c)}
+  .mood .ico svg{width:100%;height:100%}
+  .mood h3{font-size:20px;font-weight:600;margin-top:14px}
+  .mood p.sub{font-size:14px;color:rgba(244,239,232,.82);font-weight:500;margin-top:4px;line-height:1.35}
+  .spec{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .spec span{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:99px;padding:4px 9px 4px 7px;font-variant-numeric:tabular-nums}
+  .spec svg{width:13px;height:13px}
+  .mood .dot{position:absolute;top:16px;right:16px;width:8px;height:8px;border-radius:50%;background:var(--c);opacity:0;transform:scale(.4);transition:.4s}
+  .mood.active .dot{opacity:1;transform:scale(1);box-shadow:0 0 12px var(--c)}
+
+  /* ---------- controls ---------- */
+  .controls{
+    grid-column:1/-1;
+    display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:16px;
+  }
+  .card{border:1px solid var(--line);background:var(--card);border-radius:24px;padding:20px 22px;backdrop-filter:blur(12px)}
+  .card h4{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .card h4 b{font-size:13px;letter-spacing:0;text-transform:none;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+
+  .slider-row{margin-bottom:18px}
+  .slider-row:last-child{margin-bottom:0}
+  .slider-row label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px;color:var(--muted)}
+  .slider-row label b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:100%;height:34px;border-radius:99px;
+    background:var(--track, rgba(255,255,255,.08));outline:none;cursor:pointer;
+    border:1px solid var(--line);
+  }
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;border-radius:50%;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4),0 0 0 4px rgba(255,255,255,.12);margin-top:0}
+  input[type=range]::-moz-range-thumb{width:30px;height:30px;border-radius:50%;background:#fff;border:none;box-shadow:0 2px 10px rgba(0,0,0,.4)}
+  input[type=range]:focus-visible{box-shadow:0 0 0 3px rgba(255,255,255,.3)}
+  #bright{--track:linear-gradient(90deg, rgba(255,255,255,.04), rgba(var(--glow),.85))}
+  #kelvin{--track:linear-gradient(90deg,#ff8a2b,#ffc27a,#fff1dc,#dfe9ff,#a9c6ff)}
+  #blinds{--track:repeating-linear-gradient(90deg, rgba(255,255,255,.10) 0 6px, rgba(255,255,255,.03) 6px 12px)}
+
+  /* zones */
+  .zones{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+  .zone{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:16px;background:rgba(0,0,0,.18);border:1px solid var(--line)}
+  .zone span{font-size:12px;color:var(--muted);flex:1}
+  .zone b{font-size:12px;font-variant-numeric:tabular-nums;width:34px;text-align:right}
+  .zone .bar{flex:1.2;height:6px;border-radius:9px;background:rgba(255,255,255,.08);overflow:hidden}
+  .zone .bar i{display:block;height:100%;width:0;background:rgba(var(--glow),.95);border-radius:9px;transition:width var(--t), background var(--t)}
+
+  /* thermostat */
+  .thermo{display:flex;align-items:center;gap:18px}
+  .dial{position:relative;width:150px;height:150px;flex:none}
+  .dial svg{width:100%;height:100%;transform:rotate(135deg)}
+  .dial .val{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .dial .val b{font-family:'Instrument Serif',serif;font-weight:400;font-size:46px;line-height:1;font-variant-numeric:tabular-nums}
+  .dial .val small{font-size:11px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-top:4px}
+  #arc{transition:stroke-dashoffset .8s cubic-bezier(.4,.1,.2,1), stroke .8s}
+  .steppers{display:flex;flex-direction:column;gap:10px;flex:1}
+  .step{appearance:none;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--ink);border-radius:16px;height:52px;font-size:24px;cursor:pointer;font-family:inherit;transition:background .2s}
+  .step:hover{background:rgba(255,255,255,.12)}
+  .step:active{transform:scale(.96)}
+  .thermo-meta{margin-top:14px;display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+  .thermo-meta b{color:var(--ink);font-weight:600}
+
+  .reset{appearance:none;background:none;border:none;color:var(--muted);font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;padding:4px}
+  .reset:hover{color:var(--ink)}
+  .off-btn{appearance:none;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--ink);border-radius:99px;padding:9px 16px;font:inherit;font-size:13px;cursor:pointer;display:flex;gap:8px;align-items:center}
+  .off-btn:hover{background:rgba(255,255,255,.08)}
+  .off-btn svg{width:15px;height:15px}
+
+  /* toast */
+  .toast{position:fixed;left:50%;top:26px;transform:translate(-50%,-30px);opacity:0;z-index:10;
+    background:rgba(20,17,15,.88);backdrop-filter:blur(12px);border:1px solid var(--line);
+    padding:12px 18px;border-radius:99px;font-size:13px;transition:.45s cubic-bezier(.4,.1,.2,1);pointer-events:none}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* svg room light transitions */
+  .room *{transition:opacity var(--t), fill var(--t), stop-color var(--t)}
+  #blind{transition:height var(--t)}
+  .room .slats{transition:transform var(--t)}
+
+  @media (max-width: 1020px){
+    .panel{grid-template-columns:1fr;padding:20px}
+    .controls{grid-template-columns:1fr}
+    .mood-grid{grid-template-columns:repeat(3,1fr)}
+    .stage{min-height:420px}
+  }
+  @media (max-width: 560px){
+    .mood-grid{grid-template-columns:repeat(2,1fr)}
+    .room-id h1{font-size:30px}
+    .status .chip:nth-child(2){display:none}
+    .mood-now strong{font-size:40px}
+    .readout{display:none}
+  }
+  @media (prefers-reduced-motion: reduce){ :root{--t:0s} }
+</style>
+</head>
+<body>
+<div class="ambient"></div>
+<div class="grain"></div>
+
+<main class="panel">
+  <!-- TOP BAR -->
+  <header class="top">
+    <div class="room-id">
+      <h1>Kamer 412</h1>
+      <span>Welkom, gast</span>
+    </div>
+    <div class="status">
+      <div class="chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/><circle cx="12" cy="12" r="4"/></svg>
+        Buiten <b>2°C</b>
+      </div>
+      <div class="chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <b id="clock">--:--</b>
+      </div>
+    </div>
+  </header>
+
+  <!-- ROOM VISUAL -->
+  <section class="stage" aria-label="Voorbeeld van de kamer">
+    <svg class="room" viewBox="0 -60 640 500" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+          <stop id="sky1" offset="0" stop-color="#0d1630"/>
+          <stop id="sky2" offset="1" stop-color="#2a2340"/>
+        </linearGradient>
+        <radialGradient id="gCeil" cx=".5" cy="0" r=".9">
+          <stop offset="0" stop-color="rgb(var(--glow))" class="gc" stop-opacity=".9"/>
+          <stop offset="1" stop-color="rgb(var(--glow))" class="gc" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="gLamp" cx=".5" cy=".5" r=".5">
+          <stop offset="0" class="gc" stop-opacity="1"/>
+          <stop offset=".35" class="gc" stop-opacity=".45"/>
+          <stop offset="1" class="gc" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="gFloor" cx=".5" cy=".5" r=".5">
+          <stop offset="0" class="gc" stop-opacity=".9"/>
+          <stop offset="1" class="gc" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="gRead" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" class="gc" stop-opacity=".85"/>
+          <stop offset="1" class="gc" stop-opacity="0"/>
+        </linearGradient>
+        <radialGradient id="gWin" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#e6eeff" stop-opacity=".9"/><stop offset="1" stop-color="#e6eeff" stop-opacity="0"/></radialGradient>
+        <filter id="blur8"><feGaussianBlur stdDeviation="8"/></filter>
+        <clipPath id="winClip"><rect x="404" y="70" width="168" height="190" rx="4"/></clipPath>
+      </defs>
+
+      <!-- base room (lit tones) -->
+      <rect y="-60" width="640" height="500" fill="#c9b8a6"/>              <!-- back wall -->
+      <polygon points="0,-60 60,40 60,340 0,440" fill="#b5a391"/>      <!-- left wall -->
+      <polygon points="0,440 60,340 640,340 640,440" fill="#8a7563"/> <!-- floor -->
+      <rect x="60" y="40" width="580" height="4" fill="#d9cbbd" opacity=".6"/>
+      <!-- window -->
+      <rect x="398" y="64" width="180" height="202" rx="6" fill="#6d5c4d"/>
+      <g clip-path="url(#winClip)">
+        <rect x="404" y="70" width="168" height="190" fill="url(#sky)"/>
+        <circle id="moon" cx="530" cy="110" r="12" fill="#f5efd8"/>
+        <g id="stars" fill="#fff">
+          <circle cx="430" cy="95" r="1.2"/><circle cx="470" cy="130" r="1"/><circle cx="455" cy="88" r=".9"/>
+          <circle cx="500" cy="160" r="1.1"/><circle cx="550" cy="150" r=".9"/><circle cx="420" cy="170" r="1"/>
+        </g>
+        <!-- skyline -->
+        <path d="M404 260 V220 h18 v-20 h14 v28 h20 v-40 h16 v30 h22 v-18 h18 v36 h20 v-24 h18 v48z" fill="#141427" opacity=".85"/>
+        <g id="cityLights" fill="#ffd27a" opacity=".8">
+          <rect x="426" y="206" width="3" height="3"/><rect x="460" y="196" width="3" height="3"/><rect x="462" y="212" width="3" height="3"/>
+          <rect x="502" y="214" width="3" height="3"/><rect x="530" y="222" width="3" height="3"/><rect x="556" y="232" width="3" height="3"/>
+        </g>
+      </g>
+      <rect x="398" y="160" width="180" height="5" fill="#6d5c4d"/>
+
+      <!-- ceiling light -->
+      <rect x="236" y="-60" width="2" height="110" fill="#5a4a3d"/>
+      <path d="M207 50 q30 -14 60 0 l10 26 h-80z" fill="#e6d8c6"/>
+
+      <!-- headboard + bed -->
+      <rect x="110" y="178" width="236" height="96" rx="10" fill="#5b4636"/>
+      <rect x="96" y="262" width="264" height="58" rx="10" fill="#efe7dc"/>
+      <rect x="96" y="300" width="264" height="44" rx="8" fill="#a68d76"/>
+      <rect x="120" y="236" width="88" height="38" rx="14" fill="#fbf6ef"/>
+      <rect x="220" y="236" width="88" height="38" rx="14" fill="#fbf6ef"/>
+      <rect x="96" y="276" width="264" height="26" fill="#8c5d48"/>
+      <!-- nightstand -->
+      <rect x="364" y="262" width="44" height="64" rx="4" fill="#6a5443"/>
+      <rect x="372" y="250" width="22" height="12" rx="2" fill="#8a9a8f"/>
+      <!-- armchair -->
+      <rect x="470" y="282" width="110" height="60" rx="16" fill="#3f5a58"/>
+      <rect x="478" y="250" width="94" height="44" rx="14" fill="#4c6967"/>
+      <!-- book + cup on side table -->
+      <rect x="434" y="300" width="30" height="40" rx="3" fill="#6a5443"/>
+      <rect x="438" y="294" width="20" height="6" rx="1" fill="#b94a3a"/>
+
+      <!-- DARKNESS overlay: tinted by how much light there is -->
+      <rect id="dark" y="-60" width="640" height="500" fill="#07060a" opacity=".6"/>
+
+      <!-- LIGHT layers (screen-ish: drawn over darkness) -->
+      <g style="mix-blend-mode:screen">
+        <ellipse id="Lceil" cx="237" cy="150" rx="420" ry="330" fill="url(#gLamp)" opacity="0"/>
+        <ellipse id="Lwin" cx="488" cy="200" rx="260" ry="280" fill="url(#gWin)" opacity="0"/>
+      </g>
+      <!-- lamp bulbs -->
+      <ellipse id="Bceil" cx="237" cy="76" rx="36" ry="5" class="gcf" opacity="0"/>
+    </svg>
+
+    <div class="stage-caption">
+      <div class="mood-now">
+        <small>Actieve mood</small>
+        <strong id="moodName">Chill</strong>
+        <p id="moodDesc"></p>
+      </div>
+      <div class="readout">
+        <div><small>Licht</small><b id="roBright">–</b></div>
+        <div><small>Kleur</small><b id="roKelvin">–</b></div>
+        <div><small>Klimaat</small><b id="roTemp">–</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MOODS -->
+  <section class="moods" aria-label="Moods">
+    <div class="section-label"><span>Kies je mood</span><span>Tik op een mood</span></div>
+    <div class="mood-grid" id="moodGrid"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* Each mood sets ONE main light (brightness + colour temperature),
+   and the room temperature. No manual controls. */
+const ICONS = {
+  chill:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 15c2-1.5 4-1.5 6 0s4 1.5 6 0 3-1.2 4-.8"/><path d="M4 19c2-1.5 4-1.5 6 0s4 1.5 6 0 3-1.2 4-.8"/><path d="M8 10a4 4 0 0 1 8 0"/><path d="M12 3v2"/></svg>',
+  cozy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c2 3 5 5 5 9a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-7.5z"/><path d="M5 21h14"/></svg>',
+  focus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>',
+  energy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+  sleep:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/><path d="M15 4h4l-4 4h4" stroke-linecap="round"/></svg>',
+  wake:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 18h18"/><path d="M7 18a5 5 0 0 1 10 0"/><path d="M12 6v3M5.6 10.6l1.8 1.4M18.4 10.6 16.6 12M3 14h2M19 14h2"/></svg>'
+};
+const BULB='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg>';
+const THERMO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/></svg>';
+const MOODS = [
+  {id:'chill',  name:'Chill',     sub:'Gedimd & behaaglijk',     color:'#f2a65a', bright:45, kelvin:2500, temp:21.5, sky:'evening',
+   desc:'Gedimd, warm licht en een aangename temperatuur om tot rust te komen.'},
+  {id:'cozy',   name:'Gezellig',  sub:'Zacht & warm',    color:'#ff9f6b', bright:60, kelvin:2200, temp:23,   sky:'evening',
+   desc:'Zacht, goudkleurig licht en extra warmte – ideaal op een koude avond.'},
+  {id:'focus',  name:'Focus',     sub:'Helder & koel',  color:'#8fb8ff', bright:95, kelvin:5000, temp:20,   sky:'evening',
+   desc:'Helder, koel licht en een frissere kamer om geconcentreerd te werken.'},
+  {id:'energy', name:'Energie',   sub:'Fel & fris',         color:'#ffd35a', bright:100,kelvin:4200, temp:20.5, sky:'morning',
+   desc:'Maximaal, helder licht en een frisse kamer om op te laden en actief te zijn.'},
+  {id:'sleep',  name:'Slapen',    sub:'Donker & koel',  color:'#9d8cff', bright:5,  kelvin:1900, temp:18.5, sky:'night',
+   desc:'Het licht dimt tot een minimum en de kamer koelt af voor een goede nachtrust.'},
+  {id:'wake',   name:'Ochtend',   sub:'Licht & aangenaam',  color:'#ffd9a0', bright:70, kelvin:3500, temp:21,   sky:'morning',
+   desc:'Licht dat zacht helderder wordt en een aangename temperatuur om rustig wakker te worden.'}
+];
+const SKIES = { evening:['#0d1630','#3a2b4a',1,.85], night:['#05070f','#10111e',1,.35], morning:['#8fb8e8','#f6d3a8',0,0] };
+const $ = id => document.getElementById(id);
+
+function kToRgb(k){
+  const t=k/100; let r,g,b;
+  if(t<=66){ r=255; g=99.47*Math.log(t)-161.12; b=t<=19?0:138.52*Math.log(t-10)-305.04; }
+  else { r=329.7*Math.pow(t-60,-0.1332); g=288.12*Math.pow(t-60,-0.0755); b=255; }
+  const c=v=>Math.max(0,Math.min(255,Math.round(v))); return [c(r),c(g),c(b)];
+}
+
+const grid=$('moodGrid');
+MOODS.forEach(m=>{
+  const b=document.createElement('button');
+  b.className='mood'; b.dataset.id=m.id; b.style.setProperty('--c',m.color);
+  b.setAttribute('aria-pressed','false');
+  b.innerHTML=`<span class="dot"></span><span class="ico">${ICONS[m.id]}</span><div><h3>${m.name}</h3><p class="sub">${m.sub}</p><div class="spec"><span>${BULB}${m.bright}%</span><span>${THERMO}${m.temp.toFixed(1).replace('.',',')}°C</span></div></div>`;
+  b.addEventListener('click',()=>applyMood(m,true));
+  grid.appendChild(b);
+});
+
+function applyMood(m, announce){
+  document.querySelectorAll('.mood').forEach(el=>{
+    const on=el.dataset.id===m.id; el.classList.toggle('active',on); el.setAttribute('aria-pressed',on);
+  });
+  $('moodName').textContent=m.name; $('moodDesc').textContent=m.desc;
+
+  const lvl=m.bright/100, rgb=kToRgb(m.kelvin), root=document.documentElement.style;
+  root.setProperty('--glow',rgb.join(',')); root.setProperty('--level',lvl.toFixed(3));
+  document.querySelectorAll('.gc').forEach(s=>s.setAttribute('stop-color',`rgb(${rgb})`));
+  document.querySelectorAll('.gcf').forEach(s=>s.setAttribute('fill',`rgb(${rgb})`));
+
+  const sky=SKIES[m.sky];
+  $('sky1').setAttribute('stop-color',sky[0]); $('sky2').setAttribute('stop-color',sky[1]);
+  $('moon').style.opacity=sky[2]; $('stars').style.opacity=sky[2]*.8; $('cityLights').style.opacity=sky[3];
+  const daylight = m.sky==='morning' ? 0.5 : 0;
+  $('Lwin').style.opacity=daylight*.6;
+
+  const total=Math.min(1, lvl*.95 + daylight);
+  $('dark').style.opacity=Math.max(.06, .9 - total*.95).toFixed(3);
+  $('Lceil').style.opacity=(lvl*.85).toFixed(3);
+  $('Bceil').style.opacity=lvl>0 ? .45+lvl*.55 : 0;
+
+  $('roBright').textContent=m.bright+'%';
+  $('roKelvin').textContent=m.kelvin<3000?'Warm':m.kelvin<4500?'Neutraal':'Koel';
+  $('roTemp').textContent=m.temp.toFixed(1)+'°';
+  if(announce) toast(`${m.name} geactiveerd`);
+}
+
+function tick(){ $('clock').textContent=new Date().toLocaleTimeString('nl-BE',{hour:'2-digit',minute:'2-digit'}); }
+tick(); setInterval(tick,15000);
+let tt; function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(tt); tt=setTimeout(()=>t.classList.remove('show'),1800); }
+
+const h=new Date().getHours();
+applyMood(MOODS.find(m=>m.id===(h>=6&&h<10?'wake':h>=23||h<6?'sleep':'chill')),false);
+</script>
+</body>
+</html>
